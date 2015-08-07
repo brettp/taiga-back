@@ -46,6 +46,7 @@ class UserPermission(TaigaResourcePermission):
     starred_perms = AllowAny()
     change_email_perms = AllowAny()
     contacts_perms = AllowAny()
+    votes_perms = AllowAny()
 
 
 class RolesPermission(TaigaResourcePermission):

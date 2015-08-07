@@ -35,6 +35,8 @@ from taiga.base.api.utils import get_object_or_404
 from taiga.base.filters import MembersFilterBackend
 from taiga.projects.votes import services as votes_service
 from taiga.projects.serializers import StarredSerializer
+from taiga.projects.votes.serializers import VotedContentSerializer
+from taiga.projects.votes.services import get_votes_list
 
 from easy_thumbnails.source_generators import pil_image
 
@@ -113,6 +115,32 @@ class UsersViewSet(ModelCrudViewSet):
         user = get_object_or_404(models.User, **kwargs)
         self.check_permissions(request, "stats", user)
         return response.Ok(services.get_stats_for_user(user, request.user))
+
+    @detail_route(methods=["GET"])
+    def votes(self, request, *args, **kwargs):
+        for_user = get_object_or_404(models.User, **kwargs)
+        from_user = request.user
+        self.check_permissions(request, 'votes', for_user)
+        filters = {
+            "type": request.GET.get("type", None),
+            "q": request.GET.get("q", None),
+        }
+
+        self.object_list = get_votes_list(for_user, from_user, **filters)
+        page = self.paginate_queryset(self.object_list)
+
+        extra_args = {
+            "many": True,
+            "user_votes": services.get_voted_content_for_user(request.user),
+            "user_watching": services.get_watching_content_for_user(request.user),
+        }
+
+        if page is not None:
+            serializer = VotedContentSerializer(page.object_list, **extra_args)
+        else:
+            serializer = VotedContentSerializer(self.object_list, **extra_args)
+
+        return response.Ok(serializer.data)
 
     @list_route(methods=["POST"])
     def password_recovery(self, request, pk=None):

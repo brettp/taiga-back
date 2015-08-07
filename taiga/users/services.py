@@ -142,3 +142,41 @@ def get_stats_for_user(from_user, by_user):
         'total_num_closed_userstories': total_num_closed_userstories,
     }
     return project_stats
+
+
+def get_voted_content_for_user(user):
+    """Returns a dict where:
+        - The key is the content_type model
+        - The values are list of id's of the different objects voted by the user
+    """
+    if user.is_anonymous():
+        return {}
+
+    user_votes = {}
+    for (ct_model, object_id) in user.votes.values_list("content_type__model", "object_id"):
+        list = user_votes.get(ct_model, [])
+        list.append(object_id)
+        user_votes[ct_model] = list
+
+    return user_votes
+
+def get_watching_content_for_user(user):
+    """Returns a dict where:
+        - The key is the content_type model
+        - The values are list of id's of the different objects watched by the user
+    """
+    if user.is_anonymous():
+        return {}
+
+    Project = apps.get_model('projects', 'Project')
+    UserStory = apps.get_model('userstories', 'UserStory')
+    Task = apps.get_model('tasks', 'Task')
+    Issue = apps.get_model('issues', 'Issue')
+
+    user_watching = {}
+    for model in [Project, UserStory, Task, Issue]:
+        ct_model = model._meta.model_name
+        ids = [instance.id for instance in model.objects.filter(watchers__in=[user.id])]
+        user_watching[ct_model] = ids
+
+    return user_watching

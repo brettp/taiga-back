@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from django.db import connection
 from django.db.models import F
 from django.db.transaction import atomic
 from django.apps import apps
@@ -133,26 +134,25 @@ def get_votes_list(for_user, from_user, type=None, q=None):
            users_user.username assigned_to_username, users_user.full_name assigned_to_full_name, users_user.photo assigned_to_photo, users_user.email assigned_to_email,
            votes_votes.count total_votes
         FROM (
-    	SELECT 'issue' AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	SELECT 'issue' AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, coalesce(watchers, 0) total_watchers
     	    FROM issues_issue
-    	    INNER JOIN (SELECT issue_id, count(*) watchers FROM issues_issue_watchers GROUP BY issue_id) issues_watchers
+    	    LEFT JOIN (SELECT issue_id, count(*) watchers FROM issues_issue_watchers GROUP BY issue_id) issues_watchers
     	    ON issues_issue.id = issues_watchers.issue_id
     	UNION
-    	SELECT 'userstory'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	SELECT 'userstory'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, coalesce(watchers, 0) total_watchers
     	    FROM userstories_userstory
-    	    INNER JOIN (SELECT userstory_id, count(*) watchers FROM userstories_userstory_watchers GROUP BY userstory_id) userstories_watchers
+    	    LEFT JOIN (SELECT userstory_id, count(*) watchers FROM userstories_userstory_watchers GROUP BY userstory_id) userstories_watchers
     	    ON userstories_userstory.id = userstories_watchers.userstory_id
     	UNION
-    	SELECT 'task'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	SELECT 'task'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, coalesce(watchers, 0) total_watchers
     	    FROM tasks_task
-    	    INNER JOIN (SELECT task_id, count(*) watchers FROM tasks_task_watchers GROUP BY task_id) tasks_watchers
+    	    LEFT JOIN (SELECT task_id, count(*) watchers FROM tasks_task_watchers GROUP BY task_id) tasks_watchers
     	    ON tasks_task.id = tasks_watchers.task_id
     	UNION
-        -- TODO: total watchers
-    	SELECT 'project'  AS type, id, -1 AS ref, slug, name, tags, id AS project, -1 AS assigned_to, 0 total_watchers
+    	SELECT 'project'  AS type, id, -1 AS ref, slug, name, tags, id AS project, -1 AS assigned_to, coalesce(watchers, 0) total_watchers
     	    FROM projects_project
-    	    --INNER JOIN (SELECT project_id, count(*) watchers FROM projects_project_watchers GROUP BY project_id) projects_watchers
-    	    --ON projects_project.id = projects_watchers.project_id
+    	    LEFT JOIN (SELECT project_id, count(*) watchers FROM projects_project_watchers GROUP BY project_id) projects_watchers
+    	    ON projects_project.id = projects_watchers.project_id
         ) as entities
     -- END Basic info
 
@@ -195,8 +195,8 @@ def get_votes_list(for_user, from_user, type=None, q=None):
                 -- private project where the view_ permission is included in the user role for that project or in the anon permissions
                 projects_project.is_private = true
                 AND(
-                    (entities.type = 'issue' AND 'view_issue' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
-                    OR (entities.type = 'task' AND 'view_task' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                    (entities.type = 'issue' AND 'view_issues' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                    OR (entities.type = 'task' AND 'view_tasks' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
                     OR (entities.type = 'userstory' AND 'view_us' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
                     OR (entities.type = 'project' AND 'view_project' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
                 )
@@ -211,8 +211,6 @@ def get_votes_list(for_user, from_user, type=None, q=None):
         from_user_id = from_user.id
 
     sql = sql.format(for_user_id=for_user.id, from_user_id=from_user_id, filters_sql=filters_sql)
-
-    print(sql)
 
     cursor = connection.cursor()
     cursor.execute(sql)
