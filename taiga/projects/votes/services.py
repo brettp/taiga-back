@@ -113,3 +113,112 @@ def get_voted(user_or_id, model):
 
     return model.objects.extra(where=conditions, tables=('votes_vote',),
                                params=(obj_type.id, user_id))
+
+
+def get_votes_list(for_user, from_user, type=None, q=None):
+    filters_sql = ""
+    and_needed = False
+
+    if type:
+        filters_sql += " AND type = '{type}' ".format(type=type)
+
+    if q:
+        filters_sql += " AND to_tsvector(coalesce(subject, '')) @@ plainto_tsquery('{q}') ".format(q=q)
+
+    sql = """
+    -- BEGIN Basic info: we need to mix info from different tables and denormalize it
+    SELECT entities.*,
+           votes.created_date,
+           projects_project.name as project_name, projects_project.slug as project_slug, projects_project.is_private as project_is_private,
+           users_user.username assigned_to_username, users_user.full_name assigned_to_full_name, users_user.photo assigned_to_photo, users_user.email assigned_to_email,
+           votes_votes.count total_votes
+        FROM (
+    	SELECT 'issue' AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	    FROM issues_issue
+    	    INNER JOIN (SELECT issue_id, count(*) watchers FROM issues_issue_watchers GROUP BY issue_id) issues_watchers
+    	    ON issues_issue.id = issues_watchers.issue_id
+    	UNION
+    	SELECT 'userstory'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	    FROM userstories_userstory
+    	    INNER JOIN (SELECT userstory_id, count(*) watchers FROM userstories_userstory_watchers GROUP BY userstory_id) userstories_watchers
+    	    ON userstories_userstory.id = userstories_watchers.userstory_id
+    	UNION
+    	SELECT 'task'  AS type, id, ref, '' AS slug, subject, tags, project_id AS project, assigned_to_id AS assigned_to, watchers total_watchers
+    	    FROM tasks_task
+    	    INNER JOIN (SELECT task_id, count(*) watchers FROM tasks_task_watchers GROUP BY task_id) tasks_watchers
+    	    ON tasks_task.id = tasks_watchers.task_id
+    	UNION
+        -- TODO: total watchers
+    	SELECT 'project'  AS type, id, -1 AS ref, slug, name, tags, id AS project, -1 AS assigned_to, 0 total_watchers
+    	    FROM projects_project
+    	    --INNER JOIN (SELECT project_id, count(*) watchers FROM projects_project_watchers GROUP BY project_id) projects_watchers
+    	    --ON projects_project.id = projects_watchers.project_id
+        ) as entities
+    -- END Basic info
+
+    -- BEGIN Project info
+    LEFT JOIN projects_project
+        ON (entities.project = projects_project.id)
+    -- END Project info
+
+    -- BEGIN Assigned to user info
+    LEFT JOIN users_user
+        ON (assigned_to = users_user.id)
+    -- END Assigned to user info
+
+    -- BEGIN Votes info
+    INNER JOIN (
+        SELECT votes_vote.id, votes_vote.object_id, votes_vote.content_type_id, votes_vote.user_id, votes_vote.created_date,  django_content_type.model
+            FROM votes_vote
+            INNER JOIN django_content_type ON (votes_vote.content_type_id = django_content_type.id)
+            WHERE user_id = {for_user_id}
+        ) votes
+        ON (entities.id = votes.object_id AND entities.type = votes.model)
+
+    INNER JOIN votes_votes
+        ON (votes.object_id = votes_votes.object_id AND votes.content_type_id = votes_votes.content_type_id)
+    -- END Votes info
+
+    -- BEGIN Permissions checking
+    LEFT JOIN projects_membership
+        -- Here we check the memberbships from the user requesting the info
+        ON (projects_membership.user_id = {from_user_id} AND projects_membership.project_id = entities.project)
+
+    LEFT JOIN users_role
+        ON (entities.project = users_role.project_id AND users_role.id =  projects_membership.role_id)
+
+    WHERE
+        -- public project
+        (
+            projects_project.is_private = false
+            OR(
+                -- private project where the view_ permission is included in the user role for that project or in the anon permissions
+                projects_project.is_private = true
+                AND(
+                    (entities.type = 'issue' AND 'view_issue' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                    OR (entities.type = 'task' AND 'view_task' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                    OR (entities.type = 'userstory' AND 'view_us' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                    OR (entities.type = 'project' AND 'view_project' = ANY (array_cat(users_role.permissions, projects_project.anon_permissions)))
+                )
+        ))
+    -- END Permissions checking
+        {filters_sql}
+
+    ORDER BY votes.created_date;
+    """
+    from_user_id = -1
+    if not from_user.is_anonymous():
+        from_user_id = from_user.id
+
+    sql = sql.format(for_user_id=for_user.id, from_user_id=from_user_id, filters_sql=filters_sql)
+
+    print(sql)
+
+    cursor = connection.cursor()
+    cursor.execute(sql)
+
+    desc = cursor.description
+    return [
+        dict(zip([col[0] for col in desc], row))
+        for row in cursor.fetchall()
+    ]
