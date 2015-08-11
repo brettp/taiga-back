@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import time
+
 from functools import partial
 
 from django.apps import apps
@@ -23,6 +25,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
 from django.utils.translation import ugettext as _
+from django_sites import get_current
 
 from djmail import template_mail
 
@@ -248,7 +251,7 @@ def send_sync_notifications(notification_id):
     """
 
     notification = HistoryChangeNotification.objects.select_for_update().get(pk=notification_id)
-    # If the las modification is too recent we ignore it
+    # If the last modification is too recent we ignore it
     now = timezone.now()
     time_diff = now - notification.updated_datetime
     if time_diff.seconds < settings.CHANGE_NOTIFICATIONS_MIN_INTERVAL:
@@ -267,11 +270,24 @@ def send_sync_notifications(notification_id):
     model = get_model_from_key(notification.key)
     template_name = _resolve_template_name(model, change_type=notification.history_type)
     email = _make_template_mail(template_name)
+    site = get_current()
+    domain = site.domain.split(":")[0] or site.domain
+    if "ref" in obj.snapshot:
+        id = obj.snapshot["ref"]
+    elif "slug" in obj.snapshot:
+        id = obj.snapshot["slug"]
+
+
+    headers = {"Message-ID": "<%s/%s/%s@%s>" % (notification.project.slug, id, time.time(), domain),
+               "In-Reply-To": "<%s/%s@%s>" % (notification.project.slug, id, domain),
+               "References": "<%s/%s@%s>" % (notification.project.slug, id, domain),
+
+               "List-ID": 'Taiga/%s <taiga.%s@%s>'  % (notification.project.name, notification.project.slug, domain)}
 
     for user in notification.notify_users.distinct():
         context["user"] = user
         context["lang"] = user.lang or settings.LANGUAGE_CODE
-        email.send(user.email, context)
+        email.send(user.email, context, headers = headers)
 
     notification.delete()
 
