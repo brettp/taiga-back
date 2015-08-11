@@ -113,7 +113,8 @@ class UserStoryViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixi
                                  "role_points__role",
                                  "watchers")
         qs = qs.select_related("milestone", "project")
-        return self.attach_votes_attrs_to_queryset(qs)
+        qs = self.attach_votes_attrs_to_queryset(qs)
+        return self.attach_watchers_attrs_to_queryset(qs)
 
     def pre_save(self, obj):
         # This is very ugly hack, but having

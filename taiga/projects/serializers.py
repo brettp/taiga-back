@@ -40,6 +40,7 @@ from .validators import ProjectExistsValidator
 from .custom_attributes.serializers import UserStoryCustomAttributeSerializer
 from .custom_attributes.serializers import TaskCustomAttributeSerializer
 from .custom_attributes.serializers import IssueCustomAttributeSerializer
+from .notifications.mixins import WatchedResourceSerializerMixin
 from .votes.mixins.serializers import StarredResourceSerializerMixin
 
 ######################################################
@@ -305,7 +306,7 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 ## Projects
 ######################################################
 
-class ProjectSerializer(StarredResourceSerializerMixin, serializers.ModelSerializer):
+class ProjectSerializer(StarredResourceSerializerMixin, WatchedResourceSerializerMixin, serializers.ModelSerializer):
     tags = TagsField(default=[], required=False)
     anon_permissions = PgArrayField(required=False)
     public_permissions = PgArrayField(required=False)

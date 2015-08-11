@@ -21,8 +21,11 @@ from django.conf import settings
 from django.db import models
 from django.utils.translation import ugettext_lazy as _
 
+from taiga.base import response
+from taiga.base.decorators import detail_route
+from taiga.base.api import serializers
 from taiga.projects.notifications import services
-
+from taiga.projects.notifications.utils import attach_is_watched_to_queryset
 
 class WatchedResourceMixin(object):
     """
@@ -35,6 +38,33 @@ class WatchedResourceMixin(object):
     """
 
     _not_notify = False
+
+    def attach_watchers_attrs_to_queryset(self, queryset):
+        if self.request.user.is_authenticated():
+            queryset = attach_is_watched_to_queryset(self.request.user, queryset)
+
+        return queryset
+
+    def _remove_vote(self, permission, request, pk=None):
+        obj = self.get_object()
+        self.check_permissions(request, permission, obj)
+
+        services.remove_vote(obj, user=request.user)
+        return response.Ok()
+
+    @detail_route(methods=["POST"])
+    def watch(self, request, pk=None):
+        obj = self.get_object()
+        self.check_permissions(request, "watch", obj)
+        obj.watchers.add(request.user)
+        return response.Ok()
+
+    @detail_route(methods=["POST"])
+    def unwatch(self, request, pk=None):
+        obj = self.get_object()
+        self.check_permissions(request, "unwatch", obj)
+        obj.watchers.filter(id=request.user.id).delete()
+        return response.Ok()
 
     def send_notifications(self, obj, history=None):
         """
@@ -140,3 +170,11 @@ class WatchedModelMixin(models.Model):
                         self.get_owner(),)
         is_not_none = partial(is_not, None)
         return frozenset(filter(is_not_none, participants))
+
+
+class WatchedResourceSerializerMixin(serializers.ModelSerializer):
+    is_watched = serializers.SerializerMethodField("get_is_watched")
+
+    def get_is_watched(self, obj):
+        # The "is_watched" attribute is attached in the get_queryset of the viewset.
+        return getattr(obj, "is_watched", False) or False

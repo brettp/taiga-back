@@ -139,7 +139,8 @@ class IssueViewSet(OCCResourceMixin, VotedResourceMixin, HistoryResourceMixin, W
     def get_queryset(self):
         qs = super().get_queryset()
         qs = qs.prefetch_related("attachments")
-        return self.attach_votes_attrs_to_queryset(qs)
+        qs = self.attach_votes_attrs_to_queryset(qs)
+        return self.attach_watchers_attrs_to_queryset(qs)
 
     def pre_save(self, obj):
         if not obj.id:
